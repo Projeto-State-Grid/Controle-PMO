@@ -1,4 +1,3 @@
-```html
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -515,6 +514,130 @@
     padding-bottom: 6px;
     border-bottom: 1px solid var(--border);
   }
+
+  /* ─────────── PROGRESS BARS (added) ─────────── */
+  .overall-progress {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: #36343A;
+    border-bottom: 2px solid #E36523;
+    padding: 12px 32px;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.10);
+  }
+  .op-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-family: 'DM Mono', monospace;
+    color: #9D8A80;
+    white-space: nowrap;
+  }
+  .op-track {
+    flex: 1;
+    height: 12px;
+    background: rgba(255,255,255,0.10);
+    border-radius: 6px;
+    overflow: hidden;
+    min-width: 120px;
+  }
+  .op-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #FA8919, #E36523);
+    border-radius: 6px;
+    transition: width 0.55s cubic-bezier(.4,0,.2,1);
+  }
+  .op-pct {
+    font-size: 20px;
+    font-weight: 600;
+    color: #FFFFFF;
+    font-family: 'Sora', sans-serif;
+    letter-spacing: -0.02em;
+    min-width: 56px;
+    text-align: right;
+  }
+  .op-count {
+    font-size: 11px;
+    color: #9D8A80;
+    font-family: 'DM Mono', monospace;
+    white-space: nowrap;
+  }
+  .op-reset {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.18);
+    color: #9D8A80;
+    width: 28px; height: 28px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    transition: color .15s, border-color .15s, background .15s;
+  }
+  .op-reset:hover { color: #fff; border-color: #E36523; background: rgba(227,101,35,0.18); }
+
+  .sync-chip {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.18);
+    color: #9D8A80;
+    background: rgba(255,255,255,0.06);
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .sync-chip .dot { width: 7px; height: 7px; border-radius: 50%; background: #9D8A80; }
+  .sync-chip.cloud .dot { background: #E36523; box-shadow: 0 0 0 3px rgba(227,101,35,0.22); }
+  .sync-chip.local .dot { background: #FA8919; }
+
+  /* Per-P bar injected into each .prod-header */
+  .pp-wrap {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .pp-track {
+    width: 130px;
+    height: 7px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    overflow: hidden;
+  }
+  .pp-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: 5px;
+    transition: width 0.45s cubic-bezier(.4,0,.2,1);
+  }
+  .pp-pct {
+    font-size: 12px;
+    font-weight: 600;
+    font-family: 'DM Mono', monospace;
+    color: var(--text2);
+    min-width: 38px;
+    text-align: right;
+  }
+  .pp-count {
+    font-size: 10px;
+    color: var(--text3);
+    font-family: 'DM Mono', monospace;
+    white-space: nowrap;
+  }
+  @media (max-width: 760px) {
+    .overall-progress { flex-wrap: wrap; gap: 10px; padding: 12px 16px; }
+    .op-track { order: 6; flex-basis: 100%; }
+    .prod-header { flex-wrap: wrap; }
+    .pp-wrap { width: 100%; margin-left: 0; margin-top: 8px; }
+    .pp-track { flex: 1; width: auto; }
+  }
 </style>
 </head>
 <body>
@@ -529,6 +652,15 @@
     <span class="chip">15 macro atividades</span>
     <span class="chip accent">R$ 879.000</span>
   </div>
+</div>
+
+<div class="overall-progress" id="overallProgress">
+  <span class="op-label">Progresso geral</span>
+  <div class="op-track"><div class="op-fill" id="opFill"></div></div>
+  <span class="op-pct" id="opPct">0%</span>
+  <span class="op-count" id="opCount">0 / 0 entregas</span>
+  <span class="sync-chip" id="syncChip"><span class="dot"></span><span id="syncText">Carregando…</span></span>
+  <button class="op-reset" id="opReset" title="Resetar todo o progresso">&#8635;</button>
 </div>
 
 <div class="container">
@@ -1028,7 +1160,192 @@
   });
 </script>
 
+<script type="module">
+  /* =====================================================================
+     PERSISTÊNCIA + BARRAS DE PROGRESSO
+     ---------------------------------------------------------------------
+     • Para progresso COMPARTILHADO entre todos que abrem o painel, cole
+       abaixo a configuração do seu projeto Firebase (instruções enviadas).
+     • Enquanto não preencher, o painel salva apenas neste navegador.
+  ===================================================================== */
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getDatabase, ref, onValue, update } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+  // 🔧 COLE AQUI a config do seu projeto Firebase ↓↓↓
+  const FIREBASE_CONFIG = {
+    apiKey:            "COLE_SUA_API_KEY",
+    authDomain:        "SEU_PROJETO.firebaseapp.com",
+    databaseURL:       "https://SEU_PROJETO-default-rtdb.firebaseio.com",
+    projectId:         "SEU_PROJETO",
+    storageBucket:     "SEU_PROJETO.appspot.com",
+    messagingSenderId: "000000000000",
+    appId:             "1:000000000000:web:xxxxxxxxxxxxxxxx"
+  };
+  const DB_PATH = "state-grid/checks"; // nó onde o progresso é salvo
+  const LS_KEY  = "sgbh-pmo-state-grid";
+
+  /* ---------- hash estável a partir do texto do item ---------- */
+  function hash(str){
+    let h = 5381;
+    for (let i = 0; i < str.length; i++) h = (((h << 5) + h) ^ str.charCodeAt(i)) >>> 0;
+    return h.toString(36);
+  }
+
+  /* ---------- indexar checkboxes e montar barra por "P" ---------- */
+  const sections = [...document.querySelectorAll('#tab-entregas .prod-section')];
+  const groups   = [];
+  const keyToBox = new Map();
+
+  sections.forEach((sec, idx) => {
+    const badge = sec.querySelector('.prod-header .badge');
+    let pid = (badge ? badge.textContent : ('p' + (idx + 1))).trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!pid) pid = 'p' + (idx + 1);
+
+    const boxes = [...sec.querySelectorAll('input.del-checkbox')].map((el, i) => {
+      const txt = (el.parentElement.querySelector('.del-text')?.textContent || ('item' + i)).trim();
+      let key = pid + '_' + hash(pid + '|' + txt);
+      while (keyToBox.has(key)) key += 'x';
+      el.dataset.key = key;
+      keyToBox.set(key, el);
+      return { el, key };
+    });
+
+    const color = badge ? getComputedStyle(badge).backgroundColor : '#E36523';
+    const wrap = document.createElement('div');
+    wrap.className = 'pp-wrap';
+    wrap.innerHTML =
+      '<div class="pp-track"><div class="pp-fill"></div></div>' +
+      '<span class="pp-pct">0%</span>' +
+      '<span class="pp-count">0/' + boxes.length + '</span>';
+    wrap.querySelector('.pp-fill').style.background = color;
+    sec.querySelector('.prod-header').appendChild(wrap);
+
+    groups.push({
+      pid, color, boxes,
+      fillEl:  wrap.querySelector('.pp-fill'),
+      pctEl:   wrap.querySelector('.pp-pct'),
+      countEl: wrap.querySelector('.pp-count')
+    });
+  });
+
+  const allBoxes = [...keyToBox.values()];
+  const opFill  = document.getElementById('opFill');
+  const opPct   = document.getElementById('opPct');
+  const opCount = document.getElementById('opCount');
+
+  /* ---------- recalcular todas as barras ---------- */
+  function refresh(){
+    let totalDone = 0;
+    groups.forEach(g => {
+      const done = g.boxes.filter(b => b.el.checked).length;
+      const pct  = g.boxes.length ? Math.round(done / g.boxes.length * 100) : 0;
+      g.fillEl.style.width  = pct + '%';
+      g.pctEl.textContent   = pct + '%';
+      g.pctEl.style.color   = (pct === 100) ? g.color : 'var(--text2)';
+      g.countEl.textContent = done + '/' + g.boxes.length;
+      totalDone += done;
+    });
+    const pct = allBoxes.length ? Math.round(totalDone / allBoxes.length * 100) : 0;
+    opFill.style.width  = pct + '%';
+    opPct.textContent   = pct + '%';
+    opCount.textContent = totalDone + ' / ' + allBoxes.length + ' entregas';
+  }
+
+  /* ---------- camada de armazenamento ---------- */
+  let mode = 'memory';          // 'cloud' | 'local' | 'memory'
+  let memState = {};
+  let dbRef = null;
+
+  function setSync(m){
+    mode = m;
+    const chip = document.getElementById('syncChip');
+    chip.className = 'sync-chip ' + (m === 'cloud' ? 'cloud' : (m === 'local' ? 'local' : ''));
+    document.getElementById('syncText').textContent =
+      m === 'cloud' ? 'Sincronizado (nuvem)'
+    : m === 'local' ? 'Salvo neste dispositivo'
+    :                 'Somente nesta sessão';
+  }
+
+  function applyState(state){
+    state = state || {};
+    keyToBox.forEach((el, key) => { el.checked = !!state[key]; });
+    refresh();
+  }
+
+  function currentState(){
+    const s = {};
+    keyToBox.forEach((el, key) => { if (el.checked) s[key] = true; });
+    return s;
+  }
+
+  function lsAvailable(){
+    try { localStorage.setItem('__t', '1'); localStorage.removeItem('__t'); return true; }
+    catch(e){ return false; }
+  }
+  function readLocal(){
+    try { return JSON.parse(localStorage.getItem(LS_KEY) || '{}'); }
+    catch(e){ return { ...memState }; }
+  }
+  function writeLocal(state){
+    try { localStorage.setItem(LS_KEY, JSON.stringify(state)); }
+    catch(e){ memState = state; }
+  }
+
+  /* ---------- salvar ao marcar/desmarcar ---------- */
+  allBoxes.forEach(el => {
+    el.addEventListener('change', () => {
+      refresh();
+      if (mode === 'cloud' && dbRef){
+        update(dbRef, { [el.dataset.key]: el.checked ? true : null }).catch(() => {});
+      } else {
+        writeLocal(currentState());
+      }
+    });
+  });
+
+  /* ---------- resetar (com confirmação) ---------- */
+  document.getElementById('opReset').addEventListener('click', () => {
+    const shared = (mode === 'cloud');
+    const msg = shared
+      ? 'Isto vai DESMARCAR todos os itens para TODOS que acessam o painel. Continuar?'
+      : 'Isto vai desmarcar todos os itens deste dispositivo. Continuar?';
+    if (!confirm(msg)) return;
+    keyToBox.forEach(el => { el.checked = false; });
+    refresh();
+    if (mode === 'cloud' && dbRef){
+      const wipe = {};
+      keyToBox.forEach((_, key) => { wipe[key] = null; });
+      update(dbRef, wipe).catch(() => {});
+    } else {
+      writeLocal({});
+    }
+  });
+
+  /* ---------- inicialização ---------- */
+  function initLocal(){
+    setSync(lsAvailable() ? 'local' : 'memory');
+    applyState(readLocal());
+  }
+
+  const configured = FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.startsWith('COLE');
+  if (configured){
+    try {
+      const app = initializeApp(FIREBASE_CONFIG);
+      dbRef = ref(getDatabase(app), DB_PATH);
+      onValue(dbRef,
+        (snap) => { applyState(snap.val() || {}); setSync('cloud'); },
+        (err)  => { console.warn('Firebase indisponível — usando local.', err); initLocal(); }
+      );
+    } catch(e){
+      console.warn('Falha ao iniciar Firebase — usando local.', e);
+      initLocal();
+    }
+  } else {
+    initLocal();
+  }
+
+  refresh();
+</script>
+
 </body>
 </html>
-
-```
