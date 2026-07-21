@@ -454,7 +454,7 @@ document.querySelectorAll('.nav-btn').forEach(function(btn){
     document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('view-'+btn.dataset.view).classList.add('active');
-    if(btn.dataset.view==='overview'){ updateProgress(); renderUpdates(lastRows); if(SYNC_ENABLED) refreshFeed(); }
+    if(btn.dataset.view==='overview'){ updateProgress(); renderUpdates(); }
     document.querySelector('.main').scrollTo({top:0,behavior:'instant'});
   });
 });
@@ -480,18 +480,7 @@ document.querySelectorAll('.area-head').forEach(function(h){
   h.addEventListener('click',function(e){ if(e.target.closest('.area-all'))return; h.closest('.area-acc').classList.toggle('open'); });
 });
 
-/* ════ ARMAZENAMENTO ONLINE (Supabase) ════
-   Preencha as 2 constantes (Supabase → Project Settings → API).
-   Vazias = modo local (localStorage, sem compartilhar). */
-const SUPABASE_URL="";
-const SUPABASE_ANON_KEY="";
-const SUPABASE_TABLE="task_status";
-const POLL_MS=8000;
-const SYNC_ENABLED=Boolean(SUPABASE_URL&&SUPABASE_ANON_KEY);
-const sbHeaders={apikey:SUPABASE_ANON_KEY,Authorization:"Bearer "+SUPABASE_ANON_KEY};
 const checkboxes=document.querySelectorAll('.del-checkbox');
-const lastLocalEdit={};
-let lastRows=null;
 
 const taskTitles={};
 checkboxes.forEach(function(cb){
@@ -499,8 +488,6 @@ checkboxes.forEach(function(cb){
   taskTitles[cb.id]=(t?t.textContent:cb.parentElement.textContent).replace(/:$/,'').trim();
 });
 function phaseOf(id){const m=id.match(/t-f(\d)-/);return m?('P'+m[1]):'';}
-
-function setSyncStatus(){}  // indicador de status removido
 
 function setRing(id,pct,color){
   const svg=document.getElementById(id);if(!svg)return;
@@ -544,55 +531,38 @@ function updateDays(){
   setRing('ring-days',dTotal?Math.round((dTotal-dLeft)/dTotal*100):0,'#E46523');
 }
 
-async function loadFromCloud(){
-  const r=await fetch(SUPABASE_URL+'/rest/v1/'+SUPABASE_TABLE+'?select=task_id,is_checked,updated_at&order=updated_at.desc',{headers:sbHeaders});
-  if(!r.ok)throw new Error('HTTP '+r.status);return await r.json();
-}
-async function saveToCloud(id,val){
-  const r=await fetch(SUPABASE_URL+'/rest/v1/'+SUPABASE_TABLE,{method:'POST',
-    headers:Object.assign({},sbHeaders,{'Content-Type':'application/json',Prefer:'resolution=merge-duplicates'}),
-    body:JSON.stringify({task_id:id,is_checked:val,updated_at:new Date().toISOString()})});
-  if(!r.ok)throw new Error('HTTP '+r.status);
-}
-function applyState(rows){
-  if(!Array.isArray(rows))return;
-  lastRows=rows;
-  const map={};rows.forEach(r=>map[r.task_id]=r.is_checked);
-  checkboxes.forEach(function(cb){if(Date.now()-(lastLocalEdit[cb.id]||0)<5000)return;cb.checked=Boolean(map[cb.id]);});
-  updateProgress();renderUpdates(rows);
-}
-async function refreshFeed(){ try{ applyState(await loadFromCloud()); }catch(e){ console.error(e); } }
-function loadFromLocal(){
-  checkboxes.forEach(function(cb){if(localStorage.getItem(cb.id)==='true')cb.checked=true;});
-  updateProgress();renderUpdates(null);
+/* ════ HISTÓRICO LOCAL (localStorage — sem backend) ════
+   O checklist e o histórico ficam salvos neste navegador. */
+const LOG_KEY='pmo_activity_log';
+function loadLog(){ try{return JSON.parse(localStorage.getItem(LOG_KEY))||[];}catch(e){return [];} }
+function pushLog(id,checked){
+  const log=loadLog();
+  log.unshift({id:id, t:taskTitles[id]||id, p:phaseOf(id), c:checked, ts:Date.now()});
+  localStorage.setItem(LOG_KEY, JSON.stringify(log.slice(0,50)));
 }
 function fmt(ts){try{const d=new Date(ts);return d.toLocaleDateString('pt-BR')+' '+d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});}catch(e){return'';}}
-function renderUpdates(rows){
+function renderUpdates(){
   const box=document.getElementById('updates-card');if(!box)return;
-  if(!rows){box.innerHTML='<div class="upd-empty">Modo local — o histórico compartilhado aparece quando o armazenamento online estiver configurado.</div>';return;}
-  const recent=rows.filter(r=>r.updated_at).slice(0,5);
-  if(!recent.length){box.innerHTML='<div class="upd-empty">Nenhuma atualização registrada ainda.</div>';return;}
-  box.innerHTML=recent.map(function(r){
-    const title=taskTitles[r.task_id]||r.task_id,st=r.is_checked?'concluída':'reaberta';
-    return '<div class="upd"><span class="upd-dot" style="background:'+(r.is_checked?'#2E7D32':'#9D8A80')+'"></span>'+
-      '<div class="upd-main"><div class="upd-t">'+title+' — '+st+'</div><div class="upd-p">'+phaseOf(r.task_id)+'</div></div>'+
-      '<div class="upd-time">'+fmt(r.updated_at)+'</div></div>';
+  const log=loadLog();
+  if(!log.length){box.innerHTML='<div class="upd-empty">Nenhuma atualização ainda — marque itens no checklist para registrar o histórico.</div>';return;}
+  box.innerHTML=log.slice(0,8).map(function(e){
+    const st=e.c?'concluída':'reaberta';
+    return '<div class="upd"><span class="upd-dot" style="background:'+(e.c?'#2E7D32':'#9D8A80')+'"></span>'+
+      '<div class="upd-main"><div class="upd-t">'+e.t+' — '+st+'</div><div class="upd-p">'+e.p+'</div></div>'+
+      '<div class="upd-time">'+fmt(e.ts)+'</div></div>';
   }).join('');
 }
 
-async function initState(){
-  if(SYNC_ENABLED){setSyncStatus('saving');
-    try{applyState(await loadFromCloud());setSyncStatus('online');}
-    catch(e){console.warn(e);loadFromLocal();setSyncStatus('error');}
-  } else {loadFromLocal();setSyncStatus('offline');}
+function init(){
+  checkboxes.forEach(function(cb){if(localStorage.getItem(cb.id)==='true')cb.checked=true;});
+  updateProgress();renderUpdates();
 }
 checkboxes.forEach(function(cb){
-  cb.addEventListener('change',async function(e){
+  cb.addEventListener('change',function(e){
     const id=e.target.id,val=e.target.checked;
-    lastLocalEdit[id]=Date.now();localStorage.setItem(id,val);updateProgress();
-    if(SYNC_ENABLED){
-      try{await saveToCloud(id,val); refreshFeed();}catch(err){console.error(err);}
-    }
+    localStorage.setItem(id,val);
+    pushLog(id,val);
+    updateProgress();renderUpdates();
   });
 });
 document.querySelectorAll('.area-all').forEach(function(all){
@@ -602,8 +572,7 @@ document.querySelectorAll('.area-all').forEach(function(all){
     kids.forEach(function(cb){if(cb.checked!==all.checked){cb.checked=all.checked;cb.dispatchEvent(new Event('change',{bubbles:true}));}});
   });
 });
-if(SYNC_ENABLED){setInterval(async function(){try{applyState(await loadFromCloud());setSyncStatus('online');}catch(e){setSyncStatus('error');}},POLL_MS);}
-updateDays();initState();
+updateDays();init();
 
 /* GANTT */
 const activities=[
