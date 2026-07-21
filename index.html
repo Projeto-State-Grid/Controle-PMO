@@ -41,7 +41,6 @@ h1,h2,.page-title,.phase-title,.hl-big,.lc-hours{font-family:'Roboto',sans-serif
 .topbar{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;flex-wrap:wrap;padding:24px 34px 8px}
 .topbar h1{font-size:19px;font-weight:700;letter-spacing:-.02em}
 .topbar .code{font-size:11px;color:var(--text3);margin-top:2px}
-.sync-badge{font-size:10px;padding:4px 10px;border-radius:6px;white-space:nowrap}
 .content{padding:8px 34px 60px}
 .view{display:none;animation:fade .25s ease}
 .view.active{display:block}
@@ -200,13 +199,12 @@ table.sched{width:100%;border-collapse:collapse;font-size:11px;min-width:940px}
     <button class="nav-btn" data-view="cobertura"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" stroke-linecap="round"/></svg>Cobertura da RFP</button>
     <button class="nav-btn" data-view="equipe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2M16 3.5a4 4 0 0 1 0 7M21 21v-2a4 4 0 0 0-3-3.8" stroke-linecap="round"/></svg>Equipe</button>
   </nav>
-  <div class="side-foot"><b>State Grid Brazil Holding</b><br>Thymos Energia — 2026<br></div>
+  <div class="side-foot"><b>State Grid Brazil Holding</b><br>Thymos Energia — 2026<br>Kick-off 22/06/2026 — ≈24 sem</div>
 </aside>
 
 <div class="main">
   <div class="topbar">
-    <div><h1>Painel PMO</h1><div class="code">THE-P-3087-2026</div></div>
-    <span class="sync-badge" id="sync-badge"></span>
+    <div><h1>Painel PMO</h1><div class="code">THE-P-3087-2026 — Plano Estratégico-Regulatório 2027–2031</div></div>
   </div>
 
   <div class="content">
@@ -339,7 +337,7 @@ table.sched{width:100%;border-collapse:collapse;font-size:11px;min-width:940px}
           </td>
           <td class="tm-mail"><a href="mailto:lucas.benassi@thymosenergia.com.br">lucas.benassi@thymosenergia.com.br</a></td>
           <td>Capital</td>
-          <td>Analista</td>
+          <td>Estagiário</td>
         </tr>
         <tr>
           <td class="tm-name">
@@ -421,9 +419,9 @@ table.sched{width:100%;border-collapse:collapse;font-size:11px;min-width:940px}
           <td>Regulatório</td>
           <td>Analista</td>
         </tr>
-                <tr>
+        <tr>
           <td class="tm-name">
-            <!-- FOTO Leonardo Amaral: cole o link OU o data URI da foto entre as aspas do src="" abaixo. Vazio/quebrado mostra as iniciais LB. -->
+            <!-- FOTO Leonardo Amaral: cole o link OU o data URI da foto entre as aspas do src="" abaixo. Vazio/quebrado mostra as iniciais LA. -->
             <span class="avatar" data-ini="LA"><img src="" alt="Leonardo Amaral" onerror="this.remove()"></span>
             Leonardo Amaral
           </td>
@@ -456,6 +454,7 @@ document.querySelectorAll('.nav-btn').forEach(function(btn){
     document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('view-'+btn.dataset.view).classList.add('active');
+    if(btn.dataset.view==='overview'){ updateProgress(); renderUpdates(lastRows); if(SYNC_ENABLED) refreshFeed(); }
     document.querySelector('.main').scrollTo({top:0,behavior:'instant'});
   });
 });
@@ -487,11 +486,12 @@ document.querySelectorAll('.area-head').forEach(function(h){
 const SUPABASE_URL="";
 const SUPABASE_ANON_KEY="";
 const SUPABASE_TABLE="task_status";
-const POLL_MS=15000;
+const POLL_MS=8000;
 const SYNC_ENABLED=Boolean(SUPABASE_URL&&SUPABASE_ANON_KEY);
 const sbHeaders={apikey:SUPABASE_ANON_KEY,Authorization:"Bearer "+SUPABASE_ANON_KEY};
 const checkboxes=document.querySelectorAll('.del-checkbox');
 const lastLocalEdit={};
+let lastRows=null;
 
 const taskTitles={};
 checkboxes.forEach(function(cb){
@@ -500,12 +500,7 @@ checkboxes.forEach(function(cb){
 });
 function phaseOf(id){const m=id.match(/t-f(\d)-/);return m?('P'+m[1]):'';}
 
-const syncBadge=document.getElementById('sync-badge');
-function setSyncStatus(s){
-  const m={online:["\u25CF online","#E8F5E9","#2E7D32"],saving:["\u21BB salvando…","#FEF4E6","#7A3D06"],
-    offline:["\u25CF local","#EEECE8","#5A5651"],error:["\u25CF erro de rede","#FDECEA","#B71C1C"]};
-  const v=m[s]||m.offline;syncBadge.textContent=v[0];syncBadge.style.background=v[1];syncBadge.style.color=v[2];
-}
+function setSyncStatus(){}  // indicador de status removido
 
 function setRing(id,pct,color){
   const svg=document.getElementById(id);if(!svg)return;
@@ -560,10 +555,13 @@ async function saveToCloud(id,val){
   if(!r.ok)throw new Error('HTTP '+r.status);
 }
 function applyState(rows){
+  if(!Array.isArray(rows))return;
+  lastRows=rows;
   const map={};rows.forEach(r=>map[r.task_id]=r.is_checked);
   checkboxes.forEach(function(cb){if(Date.now()-(lastLocalEdit[cb.id]||0)<5000)return;cb.checked=Boolean(map[cb.id]);});
   updateProgress();renderUpdates(rows);
 }
+async function refreshFeed(){ try{ applyState(await loadFromCloud()); }catch(e){ console.error(e); } }
 function loadFromLocal(){
   checkboxes.forEach(function(cb){if(localStorage.getItem(cb.id)==='true')cb.checked=true;});
   updateProgress();renderUpdates(null);
@@ -571,7 +569,7 @@ function loadFromLocal(){
 function fmt(ts){try{const d=new Date(ts);return d.toLocaleDateString('pt-BR')+' '+d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});}catch(e){return'';}}
 function renderUpdates(rows){
   const box=document.getElementById('updates-card');if(!box)return;
-  if(!SYNC_ENABLED||!rows){box.innerHTML='<div class="upd-empty">Modo local — o histórico compartilhado aparece quando o armazenamento online estiver configurado.</div>';return;}
+  if(!rows){box.innerHTML='<div class="upd-empty">Modo local — o histórico compartilhado aparece quando o armazenamento online estiver configurado.</div>';return;}
   const recent=rows.filter(r=>r.updated_at).slice(0,5);
   if(!recent.length){box.innerHTML='<div class="upd-empty">Nenhuma atualização registrada ainda.</div>';return;}
   box.innerHTML=recent.map(function(r){
@@ -592,8 +590,8 @@ checkboxes.forEach(function(cb){
   cb.addEventListener('change',async function(e){
     const id=e.target.id,val=e.target.checked;
     lastLocalEdit[id]=Date.now();localStorage.setItem(id,val);updateProgress();
-    if(SYNC_ENABLED){setSyncStatus('saving');
-      try{await saveToCloud(id,val);setSyncStatus('online');}catch(err){console.error(err);setSyncStatus('error');}
+    if(SYNC_ENABLED){
+      try{await saveToCloud(id,val); refreshFeed();}catch(err){console.error(err);}
     }
   });
 });
