@@ -493,8 +493,8 @@ document.querySelectorAll('.area-head').forEach(function(h){
        updated_at timestamptz not null default now()
      );
 */
-const SUPABASE_URL      = "";            // ex.: https://abcd1234.supabase.co
-const SUPABASE_ANON_KEY = "";            // chave anon (public)
+const SUPABASE_URL      = "https://dbtzxvnnimwdwwwrlvyx.supabase.co";            // ex.: https://abcd1234.supabase.co
+const SUPABASE_ANON_KEY = "sb_publishable_nziLlxmygY0AlfOzdqsbZQ_9bSGuwvU";            // chave anon (public)
 const SUPABASE_TABLE    = "task_status";
 const POLL_MS           = 15000;         // re-sincroniza com o banco a cada 15s
 const SYNC_ENABLED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
