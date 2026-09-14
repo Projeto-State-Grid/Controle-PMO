@@ -41,6 +41,7 @@ h1,h2,.page-title,.phase-title,.hl-big,.lc-hours{font-family:'Roboto',sans-serif
 .topbar{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;flex-wrap:wrap;padding:24px 34px 8px}
 .topbar h1{font-size:19px;font-weight:700;letter-spacing:-.02em}
 .topbar .code{font-size:11px;color:var(--text3);margin-top:2px}
+.sync-badge{font-size:10px;padding:4px 10px;border-radius:6px;white-space:nowrap}
 .content{padding:8px 34px 60px}
 .view{display:none;animation:fade .25s ease}
 .view.active{display:block}
@@ -205,6 +206,7 @@ table.sched{width:100%;border-collapse:collapse;font-size:11px;min-width:940px}
 <div class="main">
   <div class="topbar">
     <div><h1>Painel PMO</h1><div class="code">THE-P-3087-2026 — Plano Estratégico-Regulatório 2027–2031</div></div>
+    <span class="sync-badge" id="sync-badge"></span>
   </div>
 
   <div class="content">
@@ -337,7 +339,7 @@ table.sched{width:100%;border-collapse:collapse;font-size:11px;min-width:940px}
           </td>
           <td class="tm-mail"><a href="mailto:lucas.benassi@thymosenergia.com.br">lucas.benassi@thymosenergia.com.br</a></td>
           <td>Capital</td>
-          <td>Estagiário</td>
+          <td>Analista</td>
         </tr>
         <tr>
           <td class="tm-name">
@@ -480,7 +482,26 @@ document.querySelectorAll('.area-head').forEach(function(h){
   h.addEventListener('click',function(e){ if(e.target.closest('.area-all'))return; h.closest('.area-acc').classList.toggle('open'); });
 });
 
+/* ════ ARMAZENAMENTO ONLINE (Supabase) ════
+   Preencha as 2 constantes abaixo (Supabase → Project Settings → API).
+   Vazias = modo local (localStorage, sem compartilhar).
+
+   Tabela esperada:
+     create table task_status (
+       task_id    text primary key,
+       is_checked boolean not null default false,
+       updated_at timestamptz not null default now()
+     );
+*/
+const SUPABASE_URL      = "";            // ex.: https://abcd1234.supabase.co
+const SUPABASE_ANON_KEY = "";            // chave anon (public)
+const SUPABASE_TABLE    = "task_status";
+const POLL_MS           = 15000;         // re-sincroniza com o banco a cada 15s
+const SYNC_ENABLED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+const sbHeaders={apikey:SUPABASE_ANON_KEY,Authorization:"Bearer "+SUPABASE_ANON_KEY};
+
 const checkboxes=document.querySelectorAll('.del-checkbox');
+const lastLocalEdit={};
 
 const taskTitles={};
 checkboxes.forEach(function(cb){
@@ -488,6 +509,14 @@ checkboxes.forEach(function(cb){
   taskTitles[cb.id]=(t?t.textContent:cb.parentElement.textContent).replace(/:$/,'').trim();
 });
 function phaseOf(id){const m=id.match(/t-f(\d)-/);return m?('P'+m[1]):'';}
+
+const syncBadge=document.getElementById('sync-badge');
+function setSyncStatus(s){
+  if(!syncBadge)return;
+  const m={online:["\u25CF online","#E8F5E9","#2E7D32"],saving:["\u21BB salvando…","#FEF4E6","#7A3D06"],
+    offline:["\u25CF local","#EEECE8","#5A5651"],error:["\u25CF erro de rede","#FDECEA","#B71C1C"]};
+  const v=m[s]||m.offline;syncBadge.textContent=v[0];syncBadge.style.background=v[1];syncBadge.style.color=v[2];
+}
 
 function setRing(id,pct,color){
   const svg=document.getElementById(id);if(!svg)return;
@@ -531,8 +560,7 @@ function updateDays(){
   setRing('ring-days',dTotal?Math.round((dTotal-dLeft)/dTotal*100):0,'#E46523');
 }
 
-/* ════ HISTÓRICO LOCAL (localStorage — sem backend) ════
-   O checklist e o histórico ficam salvos neste navegador. */
+/* ════ HISTÓRICO LOCAL (fallback quando o banco não está configurado) ════ */
 const LOG_KEY='pmo_activity_log';
 function loadLog(){ try{return JSON.parse(localStorage.getItem(LOG_KEY))||[];}catch(e){return [];} }
 function pushLog(id,checked){
@@ -541,11 +569,21 @@ function pushLog(id,checked){
   localStorage.setItem(LOG_KEY, JSON.stringify(log.slice(0,50)));
 }
 function fmt(ts){try{const d=new Date(ts);return d.toLocaleDateString('pt-BR')+' '+d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});}catch(e){return'';}}
-function renderUpdates(){
+
+let cloudRows=null;
+function renderUpdates(rows){
   const box=document.getElementById('updates-card');if(!box)return;
-  const log=loadLog();
-  if(!log.length){box.innerHTML='<div class="upd-empty">Nenhuma atualização ainda — marque itens no checklist para registrar o histórico.</div>';return;}
-  box.innerHTML=log.slice(0,8).map(function(e){
+  if(rows!==undefined)cloudRows=rows;
+  let entries;
+  if(SYNC_ENABLED&&cloudRows){
+    entries=cloudRows.filter(function(r){return r.updated_at;}).map(function(r){
+      return {t:taskTitles[r.task_id]||r.task_id, p:phaseOf(r.task_id), c:r.is_checked, ts:r.updated_at};
+    });
+  } else {
+    entries=loadLog();
+  }
+  if(!entries.length){box.innerHTML='<div class="upd-empty">Nenhuma atualização ainda — marque itens no checklist para registrar o histórico.</div>';return;}
+  box.innerHTML=entries.slice(0,8).map(function(e){
     const st=e.c?'concluída':'reaberta';
     return '<div class="upd"><span class="upd-dot" style="background:'+(e.c?'#2E7D32':'#9D8A80')+'"></span>'+
       '<div class="upd-main"><div class="upd-t">'+e.t+' — '+st+'</div><div class="upd-p">'+e.p+'</div></div>'+
@@ -553,16 +591,44 @@ function renderUpdates(){
   }).join('');
 }
 
-function init(){
-  checkboxes.forEach(function(cb){if(localStorage.getItem(cb.id)==='true')cb.checked=true;});
-  updateProgress();renderUpdates();
+/* ════ SINCRONIZAÇÃO COM O BANCO ════ */
+async function loadFromCloud(){
+  const r=await fetch(SUPABASE_URL+'/rest/v1/'+SUPABASE_TABLE+'?select=task_id,is_checked,updated_at&order=updated_at.desc',{headers:sbHeaders});
+  if(!r.ok)throw new Error('HTTP '+r.status);return await r.json();
 }
+async function saveToCloud(id,val){
+  const r=await fetch(SUPABASE_URL+'/rest/v1/'+SUPABASE_TABLE,{method:'POST',
+    headers:Object.assign({},sbHeaders,{'Content-Type':'application/json',Prefer:'resolution=merge-duplicates'}),
+    body:JSON.stringify({task_id:id,is_checked:val,updated_at:new Date().toISOString()})});
+  if(!r.ok)throw new Error('HTTP '+r.status);
+}
+function applyState(rows){
+  const map={};rows.forEach(function(r){map[r.task_id]=r.is_checked;});
+  checkboxes.forEach(function(cb){if(Date.now()-(lastLocalEdit[cb.id]||0)<5000)return;cb.checked=Boolean(map[cb.id]);});
+  updateProgress();renderUpdates(rows);
+}
+function loadFromLocal(){
+  checkboxes.forEach(function(cb){if(localStorage.getItem(cb.id)==='true')cb.checked=true;});
+  updateProgress();renderUpdates(null);
+}
+async function initState(){
+  if(SYNC_ENABLED){setSyncStatus('saving');
+    try{applyState(await loadFromCloud());setSyncStatus('online');}
+    catch(e){console.warn(e);loadFromLocal();setSyncStatus('error');}
+  } else {loadFromLocal();setSyncStatus('offline');}
+}
+
 checkboxes.forEach(function(cb){
-  cb.addEventListener('change',function(e){
+  cb.addEventListener('change',async function(e){
     const id=e.target.id,val=e.target.checked;
+    lastLocalEdit[id]=Date.now();
     localStorage.setItem(id,val);
     pushLog(id,val);
-    updateProgress();renderUpdates();
+    updateProgress();
+    if(SYNC_ENABLED){setSyncStatus('saving');
+      try{await saveToCloud(id,val);renderUpdates(await loadFromCloud());setSyncStatus('online');}
+      catch(err){console.error(err);setSyncStatus('error');}
+    } else { renderUpdates(null); }
   });
 });
 document.querySelectorAll('.area-all').forEach(function(all){
@@ -572,7 +638,10 @@ document.querySelectorAll('.area-all').forEach(function(all){
     kids.forEach(function(cb){if(cb.checked!==all.checked){cb.checked=all.checked;cb.dispatchEvent(new Event('change',{bubbles:true}));}});
   });
 });
-updateDays();init();
+if(SYNC_ENABLED){setInterval(async function(){
+  try{applyState(await loadFromCloud());setSyncStatus('online');}catch(e){setSyncStatus('error');}
+},POLL_MS);}
+updateDays();initState();
 
 /* GANTT */
 const activities=[
